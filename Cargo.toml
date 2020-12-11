@@ -1,0 +1,12 @@
+[package]
+name = "tio2_decrypt"
+version = "0.1.0"
+authors = ["Jan <misternerd@users.noreply.github.com>"]
+license = "MIT"
+edition = "2018"
+
+[dependencies]
+base64 = "0.13.0"
+rust-crypto = "0.2.36"
+rsa = "0.3.0"
+clap = "3.0.0-beta.2"
