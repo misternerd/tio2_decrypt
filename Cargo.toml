@@ -10,3 +10,5 @@ base64 = "0.13.0"
 rust-crypto = "0.2.36"
 rsa = "0.3.0"
 clap = "3.0.0-beta.2"
+# Using an older version of aes-stream, since the new one expects the IV as the start of the file
+aes-stream = "0.1.2"

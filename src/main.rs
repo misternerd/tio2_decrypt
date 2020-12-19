@@ -1,4 +1,4 @@
-extern crate base64;
+extern crate aesstream;
 extern crate crypto;
 
 use std::fs::{File, OpenOptions};
@@ -7,11 +7,9 @@ use std::io;
 use std::path::Path;
 use std::process::exit;
 
+use aesstream::AesReader;
 use clap::Clap;
-use crypto::aes::cbc_decryptor;
-use crypto::aes::KeySize::KeySize256;
-use crypto::blockmodes;
-use crypto::buffer::{ReadBuffer, RefReadBuffer, RefWriteBuffer, WriteBuffer};
+use crypto::aessafe::AesSafe256Decryptor;
 
 use crate::helper::backup_header::BackupHeader;
 use crate::helper::cli_options::CliOpts;
@@ -51,13 +49,6 @@ fn read_passphrase_from_input() -> String {
 
 
 fn decrypt_backup_data(decrypted_session_key: &Vec<u8>, input_file: &mut BufReader<File>, output_filename: &String) {
-	let iv: Vec<u8> = vec![0; 16];
-	let mut decryptor = cbc_decryptor(KeySize256, decrypted_session_key, &iv, blockmodes::NoPadding);
-
-	let mut total_bytes_read = 0;
-	let mut total_bytes_written = 0;
-	let mut input_buffer: Vec<u8> = vec![0; 4096];
-	let mut output_buffer: Vec<u8> = vec![0; 4096];
 	let mut output_file = OpenOptions::new()
 		.create(true)
 		.append(false)
@@ -65,49 +56,34 @@ fn decrypt_backup_data(decrypted_session_key: &Vec<u8>, input_file: &mut BufRead
 		.truncate(true)
 		.open(output_filename)
 		.expect("Failed to create output file");
-	let mut decryptor_output = RefWriteBuffer::new(&mut output_buffer);
+
+	let decryptor = AesSafe256Decryptor::new(&decrypted_session_key);
+	let iv: Vec<u8> = vec![0; 16];
+	let mut reader = AesReader::new(input_file, decryptor, iv);
+	let mut output_buffer: Vec<u8> = vec![0; 4096];
 
 	loop {
-		match input_file.read(&mut input_buffer) {
+		match reader.read(&mut output_buffer) {
 			Ok(bytes_read) => {
-				total_bytes_read += bytes_read;
-				let mut decryptor_input = RefReadBuffer::new(&input_buffer[0..bytes_read]);
-				decryptor_output.reset();
-
-				let res = decryptor.decrypt(&mut decryptor_input, &mut decryptor_output, true);
-				let decrypted_data = decryptor_output.take_read_buffer().take_remaining().to_vec();
-
-				match output_file.write_all(&decrypted_data) {
-					Ok(_) => {
-						println!("Processed {} bytes", decrypted_data.len());
-						total_bytes_written += decrypted_data.len();
-					}
-					Err(error) => {
-						println!("Failed to write to output file: {:?}", error);
-						break;
+				if bytes_read > 0 {
+					let decrypted_data = &output_buffer[0..bytes_read];
+					match output_file.write_all(decrypted_data) {
+						Ok(_) => {
+							// println!("Processed {} bytes", decrypted_data.len());
+						}
+						Err(error) => {
+							println!("Failed to write to output file: {:?}", error);
+							break;
+						}
 					}
 				}
-
-				match res {
-					Ok(_) => {}
-					Err(err) => {
-						println!("Failed to decrypt AES data: {:?}", err);
-						break;
-					}
-				}
-
-				// AES needs one more round to process the rest of the data, so the condition's at the end
-				if bytes_read < 1 {
-					println!("Done reading input file after {} bytes, wrote {} bytes", total_bytes_read, total_bytes_written);
+				else {
 					break;
 				}
 			}
 			Err(err) => {
-				println!("Failed to read data from input: {:?}", err);
-				break;
+				println!("Failed to AES decode: {:?}", err);
 			}
 		}
 	}
-
-	output_file.flush().expect("Failed to flush output file");
 }
